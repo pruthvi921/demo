@@ -1,0 +1,186 @@
+trigger:
+  branches:
+    include:
+      - '*'
+
+pr:
+  branches:
+    include:
+      - master
+
+variables:
+  - template: variables-frontend.yaml
+  - group: FrontendSecrets
+
+stages:
+
+- stage: BuildAndTest
+  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/heads/feature/'))
+  jobs:
+    - job: Build
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - checkout: self
+          clean: true
+
+        - task: NodeTool@0
+          inputs:
+            versionSpec: '18.x'
+          displayName: 'Setup Node.js'
+
+        - script: npm install
+          displayName: 'Install NPM dependencies'
+
+        - script: npm run lint
+          displayName: 'Run ESLint'
+
+        - script: npm run test -- --ci --reporters=jest-junit
+          displayName: 'Run Unit Tests with JUnit Reporter'
+
+        - task: PublishTestResults@2
+          inputs:
+            testResultsFormat: 'JUnit'
+            testResultsFiles: '**/junit.xml'
+            failTaskOnFailedTests: true
+          displayName: 'Publish Unit Test Results'
+
+        - script: npm run coverage
+          displayName: 'Run Coverage Report'
+
+        - task: PublishCodeCoverageResults@1
+          inputs:
+            codeCoverageTool: 'Cobertura'
+            summaryFileLocation: 'coverage/cobertura-coverage.xml'
+            reportDirectory: 'coverage'
+          displayName: 'Publish Code Coverage Report'
+
+        - script: npm audit --json > audit-report.json
+          displayName: 'Run Security Audit and Save Report'
+
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: 'audit-report.json'
+            ArtifactName: 'npm-audit-report'
+          displayName: 'Publish Security Audit Report'
+
+        - script: |
+            TAG=$(Build.SourceVersion:0:7)
+            echo "##vso[task.setvariable variable=IMAGE_TAG]$TAG"
+          displayName: 'Set Image Tag'
+
+        - task: Docker@2
+          displayName: 'Build Docker Image'
+          inputs:
+            command: build
+            containerRegistry: $(DevACRServiceConnection)
+            repository: $(IMAGE_NAME)
+            dockerfile: Dockerfile
+            tags: $(IMAGE_TAG)
+            buildContext: 'frontend-service'
+
+        - task: PowerShell@2
+          displayName: 'send notification to teams'
+          inputs:
+            targetType: 'inline'
+            script: |
+              $message = "Build completed for feature branch. Security reports are available."
+              Write-Host "##vso[task.setvariable variable=TEAMS_MESSAGE]$message"
+              # Add your Teams notification logic here  
+
+- stage: MasterBuildAndDeploy
+  displayName: 'Master Build, Push, Deploy to Dev'
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/master')
+  jobs:
+    - job: BuildPushDeployDev
+      steps:
+        - checkout: self
+          clean: true
+        - task: Docker@2
+          displayName: 'Build and Push Dev ACR'
+          inputs:
+            command: buildAndPush
+            containerRegistry: $(DevACRServiceConnection)
+            repository: $(FRONTEND_IMAGE_NAME)
+            dockerfile: frontend-service/Dockerfile
+            tags: $(IMAGE_TAG)
+            buildContext: frontend-service
+
+- template: deploy-stage-template.yaml
+  parameters:
+    environment: dev
+    activeColor: $(activeColor)
+    service: frontend
+
+- stage: BuildPushDeployStage
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/heads/release/')
+  jobs:
+    - job: BuildPush
+      steps:
+        - task: Docker@2
+          displayName: 'Build and Push Dev ACR'
+          inputs:
+            command: buildAndPush
+            containerRegistry: $(DevACRServiceConnection)
+            repository: $(FRONTEND_IMAGE_NAME)
+            dockerfile: frontend-service/Dockerfile
+            tags: $(IMAGE_TAG)
+            buildContext: frontend-service
+
+- template: deploy-stage-template.yaml
+  parameters:
+    environment: staging
+    activeColor: $(activeColor)
+    service: frontend
+
+- stage: ApprovalSwitchStage
+  dependsOn: BuildPushDeployStage
+  jobs:
+    - job: WaitForApproval
+      pool: server
+      steps:
+        - task: ManualValidation@0
+          inputs:
+            instructions: 'Approve to switch traffic in staging.'
+            notifyUsers: '$(StagingApprovers)'
+
+
+- template: deploy-stage-template.yaml
+  parameters:
+    environment: prod
+    activeColor: $(activeColor)
+    service: frontend
+
+- stage: ApprovalSwitchProd
+  displayName: 'Approval Before Switching Prod Traffic'
+  dependsOn: Deploy_prod
+  jobs:
+    - job: WaitForApproval
+      pool: server
+      steps:
+        - task: ManualValidation@0
+          inputs:
+            instructions: 'Please approve switching prod traffic.'
+            notifyUsers: '$(ProdApprovers)'
+
+- stage: HotfixBuildAndDeploy
+  displayName: 'Hotfix Branch Build, Push, Deploy to Prod'
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/heads/hotfix/')
+  jobs:
+    - job: BuildPushDeployProd
+      steps:
+        - task: Docker@2
+          displayName: 'Build and Push Prod ACR'
+          inputs:
+            command: buildAndPush
+            containerRegistry: $(ProdACRServiceConnection)
+            repository: $(FRONTEND_IMAGE_NAME)
+            dockerfile: frontend-service/Dockerfile
+            tags: $(IMAGE_TAG)
+            buildContext: frontend-service
+
+- template: deploy-stage-template.yaml
+  parameters:
+    environment: prod
+    activeColor: $(activeColor)
+    service: frontend

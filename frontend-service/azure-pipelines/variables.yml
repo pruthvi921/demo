@@ -1,0 +1,34 @@
+
+variables:
+  dev:
+    ACR_NAME: devacr.azurecr.io
+    ACR_SERVICE_CONNECTION: DEV_ACR_SERVICE_CONNECTION
+    K8S_SERVICE_CONNECTION: DEV_K8S_SERVICE_CONNECTION
+    K8S_NAMESPACE: frontend-dev
+    ENVIRONMENT: dev
+
+  staging:
+    ACR_NAME: stagingacr.azurecr.io
+    ACR_SERVICE_CONNECTION: STAGING_ACR_SERVICE_CONNECTION
+    K8S_SERVICE_CONNECTION: STAGING_K8S_SERVICE_CONNECTION
+    K8S_NAMESPACE: frontend-staging
+    ENVIRONMENT: staging
+
+  prod:
+    ACR_NAME: prodacr.azurecr.io
+    ACR_SERVICE_CONNECTION: PROD_ACR_SERVICE_CONNECTION
+    K8S_SERVICE_CONNECTION: PROD_K8S_SERVICE_CONNECTION
+    K8S_NAMESPACE: frontend-prod
+    ENVIRONMENT: prod
+
+  IMAGE_NAME: frontend-service
+  HELM_RELEASE: frontend-service
+  HELM_CHART_PATH: frontend-service/helm/frontend-chart
+  HELM_VALUES_PATH: frontend-service/helm/frontend-chart/values.yaml
+  HELM_VALUES_PROD_PATH: frontend-service/helm/frontend-chart/values.prod.yaml
+  HELM_VALUES_STAGE_PATH: frontend-service/helm/frontend-chart/values.stage.yaml
+  
+  stagingApprovers: 'devopsteam@aize.com'
+  prodApprovers: 'devopsteam@aize.com'
+  HelmReleaseName: 'frontend-release'
+  

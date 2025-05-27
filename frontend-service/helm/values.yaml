@@ -1,0 +1,48 @@
+replicaCount: 2
+image:
+  repository: aizedevacr.azurecr.io/frontend-service
+  tag: "latest"
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 80
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  hosts:
+    - host: frontend-dev.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+config:
+  apiUrl: "http://backend-service-active:5000"
+
+blueGreen:
+  activeColor: blue
+  inactiveColor: green
+environment: dev
+activeColor: blue
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+env:
+  LOGGING_LEVEL: INFO
+  COUNT_VALUE: 0
+  USER_NAME: default
+
+
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 75
+

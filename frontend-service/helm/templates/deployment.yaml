@@ -1,0 +1,59 @@
+{{- $colors := list .Values.blueGreen.activeColor .Values.blueGreen.inactiveColor }}
+{{- range $color := $colors }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-service-{{ $color }}
+  labels:
+    app: frontend-service
+    color: {{ $color }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: frontend-service
+      color: {{ $color }}
+  template:
+    metadata:
+      labels:
+        app: frontend-service
+        color: {{ $color }}
+    spec:
+      containers:
+        - name: frontend
+          image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "frontend-service.fullname" . }}-config
+                  key: apiUrl
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+---
+{{- end }}

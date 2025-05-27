@@ -1,0 +1,56 @@
+{{- $colors := list .Values.blueGreen.activeColor .Values.blueGreen.inactiveColor }}
+{{- range $color := $colors }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-service-{{ $color }}
+  labels:
+    app: backend-service
+    color: {{ $color }}
+spec:
+  replicas: {{ $.Values.replicaCount }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: backend-service
+      color: {{ $color }}
+  template:
+    metadata:
+      labels:
+        app: backend-service
+        color: {{ $color }}
+    spec:
+      containers:
+        - name: backend
+          image: {{ $.Values.image.repository }}:{{ $.Values.image.tag }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          env:
+            - name: ENVIRONMENT
+              value: {{ $.Values.environment | quote }}
+            - name: COLOR
+              value: {{ $color }}
+---
+{{- end }}

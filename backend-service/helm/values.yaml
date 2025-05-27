@@ -1,0 +1,47 @@
+replicaCount: 2
+environment: dev
+image:
+  repository: aizedevacr.azurecr.io/backend-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+blueGreen:
+  activeColor: blue     # active color (receives live traffic)
+  inactiveColor: green  # new deployment color
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  hosts:
+    - host: backend.dev.aize.com
+      paths:
+        - /
+  tls:
+    - hosts:
+        - backend.dev.aize.com
+      secretName: backend-tls
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+env:
+  LOGGING_LEVEL: INFO
+  COUNT_VALUE: 0
+  USER_NAME: default
+
+
+hpa:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 75

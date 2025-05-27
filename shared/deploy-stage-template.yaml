@@ -1,0 +1,110 @@
+parameters:
+- name: environment
+  type: string
+- name: activeColor
+  type: string
+- name: artifact
+  type: string
+- name: service
+  type: string
+variables:
+  - template: variables.yaml
+  - group: BackendSecrets
+
+
+
+stages:
+- stage: Deploy_${{ parameters.environment }}
+  displayName: 'Deploy to ${{ parameters.environment | upper }}'
+  dependsOn: Build
+  jobs:
+    - deployment: DeployJob
+      displayName: 'Deploy to ${{ parameters.environment }} Cluster'
+      environment: ${{ parameters.environment }}
+      pool:
+        vmImage: 'ubuntu-latest'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - download: current
+                artifact: ${{ parameters.artifact }}
+
+              - task: HelmInstaller@1
+                inputs:
+                  helmVersionToInstall: 'latest'
+
+              - task: HelmDeploy@0
+                inputs:
+                  connectionType: 'Kubernetes Service Connection'
+                  kubernetesServiceEndpoint: ${{ variables[parameters.environment].K8S_SERVICE_CONNECTION }}
+                  namespace: ${{ variables[parameters.environment].K8S_NAMESPACE }}
+                  command: upgrade
+                  chartType: FilePath
+                  chartPath: ${{ variables.HELM_CHART_PATH }}
+                  releaseName: ${{ variables.HELM_RELEASE }}-${{ parameters.service }}-${{ parameters.environment }}
+                  overrideValues: |
+                    image.repository=${{ variables[parameters.environment].ACR_NAME }}/${{ variables.IMAGE_NAME }}
+                    image.tag=$(IMAGE_TAG)
+                    blueGreen.activeColor=${{ parameters.activeColor }}
+                    environment=${{ parameters.environment }}
+                  install: true
+                  azureSubscriptionForACR: ${{ variables[parameters.environment].AZURE_SUBSCRIPTION }}
+                  azureResourceGroupForACR: ${{ variables[parameters.environment].ACR_RESOURCE_GROUP }}
+                  azureContainerRegistry: ${{ variables[parameters.environment].ACR_NAME }}
+
+- stage: Validate_${{ parameters.environment }}
+  displayName: 'Validate Green in ${{ parameters.environment | upper }}'
+  dependsOn: Deploy_${{ parameters.environment }}
+  jobs:
+    - job: RunValidationTests
+      displayName: 'Run Smoke Tests on Green'
+      pool:
+        vmImage: 'ubuntu-latest'
+      steps:
+        - script: |
+            echo "Running smoke tests against green in ${{ parameters.environment }}..."
+            curl http://${{ parameters.service }}-service-green.${{ parameters.service }}-${{ parameters.environment }}.svc.cluster.local/health || exit 1
+          displayName: 'Smoke Test Green Deployment'
+
+- stage: SwitchTraffic_${{ parameters.environment }}
+  displayName: 'Switch Traffic to Green (Manual Approval) in ${{ parameters.environment | upper }}'
+  dependsOn: Validate_${{ parameters.environment }}
+  condition: succeeded()
+  jobs:
+    - deployment: SwitchTraffic
+      displayName: 'Switch Traffic to Green'
+      environment:
+        name: ${{ parameters.environment }}
+        resourceType: VirtualMachine
+        tags: approval
+      pool:
+        vmImage: 'ubuntu-latest'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - task: HelmInstaller@1
+                inputs:
+                  helmVersionToInstall: 'latest'
+
+              - task: HelmDeploy@0
+                inputs:
+                  connectionType: 'Kubernetes Service Connection'
+                  kubernetesServiceEndpoint: ${{ variables[parameters.environment].K8S_SERVICE_CONNECTION }}
+                  namespace: ${{ variables[parameters.environment].K8S_NAMESPACE }}
+                  command: upgrade
+                  chartType: FilePath
+                  chartPath: ${{ variables[parameters.environment].HELM_CHART_PATH }}
+                  releaseName: ${{ variables.HELM_RELEASE }}-${{ parameters.service }}-${{ parameters.environment }}
+                  # Switch traffic to green
+                  overrideValues: |
+                    blueGreen.activeColor=green
+                  install: true
+                  azureSubscriptionForACR: ${{ variables[parameters.environment].AZURE_SUBSCRIPTION }}
+                  azureResourceGroupForACR: ${{ variables[parameters.environment].ACR_RESOURCE_GROUP }}
+                  azureContainerRegistry: ${{ variables[parameters.environment].ACR_NAME }}
+
+              - script: |
+                  echo "✅ Traffic switched to green in ${{ parameters.environment }}. Monitor system before cleanup."
+                displayName: 'Notify Success'
